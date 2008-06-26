@@ -1,0 +1,10 @@
+# (C) Maxim Dounin
+# Configuration for ngx_http_bytes_filter_module.
+
+ngx_addon_name="ngx_http_bytes_filter_module"
+
+HTTP_RANGE_BODY_FILTER_MODULE="$HTTP_RANGE_BODY_FILTER_MODULE \
+		ngx_http_bytes_filter_module"
+
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
+		$ngx_addon_dir/ngx_http_bytes_filter_module.c"
