@@ -82,9 +82,20 @@ static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 static ngx_int_t
 ngx_http_bytes_header_filter(ngx_http_request_t *r)
 {
-    u_char                 *p;
+    u_char                 *p, *last;
+    off_t                   start, end;
+    ngx_uint_t              suffix, bad;
+    ngx_http_bytes_t       *range;
     ngx_http_bytes_conf_t  *conf;
     ngx_http_bytes_ctx_t   *ctx;
+    enum {
+        sw_start = 0,
+        sw_first_byte_pos,
+        sw_first_byte_pos_n,
+        sw_last_byte_pos,
+        sw_last_byte_pos_n,
+        sw_done
+    } state = 0;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_bytes_filter_module);
 
@@ -102,6 +113,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
                    "bytes header filter: r %p", r);
 
     p += sizeof("bytes=") - 1;
+    last = r->args.data + r->args.len;
 
     /* create context */
 
@@ -121,38 +133,136 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
      * but no whitespaces permitted
      */
 
-#if 0
-    for ( ;; ) {
-        start = 0;
-        end = 0;
-        suffix = 0;
+    bad = 0;
 
-        if (*p != '-') {
+    while (p < last) {
+
+        switch (state) {
+
+        case sw_start:
+        case sw_first_byte_pos:
+            if (*p == '-') {
+                p++;
+                suffix = 1;
+                state = sw_last_byte_pos;
+                break;
+            }
+            suffix = 0;
+            start = 0;
+            state = sw_first_byte_pos_n;
+
+            /* fall through */
+
+        case sw_first_byte_pos_n:
+            if (*p == '-') {
+                p++;
+                state = sw_last_byte_pos;
+                break;
+            }
             if (*p < '0' || *p > '9') {
+                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                               "bytes header filter: unexpected char '%c'"
+                               " (expected first-byte-pos)", *p);
+                bad = 1;
                 break;
             }
-
-            while (*p >= '0' && *p <= '9') {
-                start = start * 10 + *p++ - '0';
-            }
-
-            if (*p != '-') {
-                break;
-            }
-
-            if (*p == ',' || *p == '\0') {
-                /* no last-byte-pos, assume end of file */
-                end = len - 1;
-            }
-
-        } else {
-            suffix = 1;
+            start = start * 10 + *p - '0';
             p++;
+            break;
+
+        case sw_last_byte_pos:
+            if (*p == ',' || *p == '&' || *p == ';') {
+                /* no last byte pos, assume end of file */
+                end = r->headers_out.content_length_n - 1;
+                state = sw_done;
+                break;
+            }
+            end = 0;
+            state = sw_last_byte_pos_n;
+
+            /* fall though */
+
+        case sw_last_byte_pos_n:
+            if (*p == ',' || *p == '&' || *p == ';') {
+                state = sw_done;
+                break;
+            }
+            if (*p < '0' || *p > '9') {
+                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                               "bytes header filter: unexpected char '%c'"
+                               " (expected last-byte-pos)", *p);
+                bad = 1;
+                break;
+            }
+            end = end * 10 + *p - '0';
+            p++;
+            break;
+
+        case sw_done:
+            range = ngx_array_push(&ctx->ranges);
+            if (range == NULL) {
+                return NGX_ERROR;
+            }
+
+            if (suffix) {
+                start = r->headers_out.content_length_n - end;
+                end = r->headers_out.content_length_n - 1;
+            }
+
+            /* note: range->end isn't inclusive, while last-byte-pos is */
+
+            range->start = start;
+            range->end = end + 1;
+
+            if (*p == ',') {
+                p++;
+                state = sw_first_byte_pos;
+                break;
+            }
+
+            goto done;
+
+        }
+
+        if (bad) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "bytes header filter: invalid range specification");
+            return ngx_http_next_header_filter(r);
         }
     }
-#endif
 
-    /* ... */
+    switch (state) {
+
+    case sw_last_byte_pos:
+        end = r->headers_out.content_length_n - 1;
+
+        /* fall through */
+
+    case sw_last_byte_pos_n:
+        range = ngx_array_push(&ctx->ranges);
+        if (range == NULL) {
+            return NGX_ERROR;
+        }
+
+        if (suffix) {
+            start = r->headers_out.content_length_n - end;
+            end = r->headers_out.content_length_n - 1;
+        }
+
+        range->start = start;
+        range->end = end + 1;
+
+        break;
+
+    default:
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "bytes header filter: invalid range specification");
+        return ngx_http_next_header_filter(r);
+
+    }
+
+done:
+    /* ... fix content-length */
 
     ngx_http_set_ctx(r, ctx, ngx_http_bytes_filter_module);
 
@@ -163,7 +273,9 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
+    ngx_uint_t             i;
     ngx_http_bytes_ctx_t  *ctx;
+    ngx_http_bytes_t      *range;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_bytes_filter_module);
 
@@ -173,6 +285,14 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "bytes body filter: r %p, in %p", r, in);
+
+    range = ctx->ranges.elts;
+
+    for (i = 0; i < ctx->ranges.nelts; i++) {
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "bytes body filter: %O-%O", range->start, range->end);
+        range++;
+    }
 
     return ngx_http_next_body_filter(r, in);
 }
