@@ -83,7 +83,7 @@ static ngx_int_t
 ngx_http_bytes_header_filter(ngx_http_request_t *r)
 {
     u_char                 *p, *last;
-    off_t                   start, end;
+    off_t                   start, end, len;
     ngx_uint_t              suffix, bad;
     ngx_http_bytes_t       *range;
     ngx_http_bytes_conf_t  *conf;
@@ -134,6 +134,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
      */
 
     bad = 0;
+    len = 0;
 
     while (p < last) {
 
@@ -213,6 +214,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 
             range->start = start;
             range->end = end + 1;
+            len += range->end - range->start;
 
             if (*p == ',') {
                 p++;
@@ -251,6 +253,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 
         range->start = start;
         range->end = end + 1;
+        len += range->end - range->start;
 
         break;
 
@@ -262,9 +265,13 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
     }
 
 done:
-    /* ... fix content-length */
+    r->headers_out.content_length_n = len;
 
     ngx_http_set_ctx(r, ctx, ngx_http_bytes_filter_module);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "bytes header filter: new length %O",
+                   r->headers_out.content_length_n);
 
     return ngx_http_next_header_filter(r);
 }
