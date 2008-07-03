@@ -9,19 +9,20 @@
 
 
 typedef struct {
-    ngx_flag_t  enable;
+    ngx_flag_t         enable;
 } ngx_http_bytes_conf_t;
 
 
 typedef struct {
-    off_t        start;
-    off_t        end;
+    off_t              start;
+    off_t              end;
 } ngx_http_bytes_t;
 
 
 typedef struct {
-    off_t        offset;
-    ngx_array_t  ranges;
+    off_t              offset;
+    ngx_array_t        ranges;
+    ngx_http_bytes_t  *range;
 } ngx_http_bytes_ctx_t;
 
 
@@ -282,10 +283,10 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     off_t                  size;
     ngx_uint_t             i;
-    ngx_chain_t           *cl, **ll;
-    ngx_buf_t             *buf;
+    ngx_chain_t          **ll, *cl, *dcl;
+    ngx_buf_t             *buf, *b;
     ngx_http_bytes_ctx_t  *ctx;
-    ngx_http_bytes_t      *range;
+    ngx_http_bytes_t      *range, *last;
 
     if (in == NULL) {
         return ngx_http_next_body_filter(r, in);
@@ -314,7 +315,14 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         range++;
     }
 
-    range = ctx->ranges.elts;
+    range = ctx->range;
+
+    if (range == NULL) {
+        range = ctx->range = ctx->ranges.elts;
+    }
+
+    last = ctx->ranges.elts;
+    last += ctx->ranges.nelts;
 
 #if 0
     /* ... temp, rewrite */
@@ -337,7 +345,9 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* ... */
 
-    for (ll = &in, cl = in; cl; ll = &cl->next, cl = cl->next) {
+    for (ll = &in, cl = in; cl; ll = &cl->next, cl = cl->next,
+                                                ctx->offset += size)
+    {
 
         buf = cl->buf;
         size = ngx_buf_size(buf);
@@ -352,6 +362,7 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             continue;
         }
 
+next:
         if (range->start > ctx->offset + size) {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: fully ignored buffer");
@@ -360,46 +371,85 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             continue;
         }
 
-        /* XXX multiple ranges */
-        /* XXX we should create new buffers/links for multiple ranges */
+        /* todo: do not create buffers/links if not needed */
+
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NGX_ERROR;
+        }
+
+        b->in_file = buf->in_file;
+        b->temporary = buf->temporary;
+        b->memory = buf->memory;
+        b->mmap = buf->mmap;
+        b->file = buf->file;
 
         if (buf->in_file) {
+            b->file_pos = buf->file_pos;
+            b->file_last = buf->file_last;
+        }
+
+        if (ngx_buf_in_memory(buf)) {
+            b->pos = buf->pos;
+            b->last = buf->last;
+        }
+
+        dcl = ngx_alloc_chain_link(r->pool);
+        if (dcl == NULL) {
+            return NGX_ERROR;
+        }
+
+        *ll = dcl;
+        dcl->buf = b;
+        dcl->next = cl->next;
+        ll = &dcl->next;
+
+        if (buf->last_buf && range == last - 1) {
+            b->last_buf = 1;
+        }
+
+        if (b->in_file) {
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: in file, %O-%O",
-                           buf->file_pos, buf->file_last);
+                           b->file_pos, b->file_last);
 
             if (range->start > ctx->offset) {
-                buf->file_pos += range->start - ctx->offset;
+                b->file_pos += range->start - ctx->offset;
             }
             if (range->end - ctx->offset < size) {
-                buf->file_last -= size - (range->end - ctx->offset);
+                b->file_last -= size - (range->end - ctx->offset);
             }
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: in file fixed, %O-%O",
-                           buf->file_pos, buf->file_last);
+                           b->file_pos, b->file_last);
         }
 
-        if (ngx_buf_in_memory(buf)) {
+        if (ngx_buf_in_memory(b)) {
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: in memory, %p-%p",
-                           buf->pos, buf->last);
+                           b->pos, b->last);
 
             if (range->start > ctx->offset) {
-                buf->pos += (size_t) (range->start - ctx->offset);
+                b->pos += (size_t) (range->start - ctx->offset);
             }
             if (range->end - ctx->offset < size) {
-                buf->last -= (size_t) (size - (range->end - ctx->offset));
+                b->last -= (size_t) (size - (range->end - ctx->offset));
             }
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: in memory fixed, %p-%p",
-                           buf->pos, buf->last);
+                           b->pos, b->last);
         }
 
-        ctx->offset += size;
+        if (range->end < ctx->offset + size) {
+            range++;
+            if (range < last) {
+                goto next;
+            }
+        }
     }
 
     return ngx_http_next_body_filter(r, in);
