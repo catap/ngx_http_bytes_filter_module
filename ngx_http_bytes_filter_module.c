@@ -417,8 +417,8 @@ next:
             if (range->start > ctx->offset) {
                 b->file_pos += range->start - ctx->offset;
             }
-            if (range->end - ctx->offset < size) {
-                b->file_last -= size - (range->end - ctx->offset);
+            if (range->end < ctx->offset + size) {
+                b->file_last -= ctx->offset + size - range->end;
             }
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -435,8 +435,8 @@ next:
             if (range->start > ctx->offset) {
                 b->pos += (size_t) (range->start - ctx->offset);
             }
-            if (range->end - ctx->offset < size) {
-                b->last -= (size_t) (size - (range->end - ctx->offset));
+            if (range->end < ctx->offset + size) {
+                b->last -= (size_t) (ctx->offset + size - range->end);
             }
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
