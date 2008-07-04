@@ -1,0 +1,28 @@
+Bytes module for nginx.
+
+This module was designed to allow easy access to range of file data.  It
+searches request arguments for 'bytes=...' and return requested range.  All
+requested data is returned concatinated in single reply, with apropriate
+Content-Length set.
+
+All of the above allows to do nasty things with regular files and even
+proxied replies, including things like flv streaming.  E.g. one may use
+something like this instead of flv module:
+
+    location /video/ {
+        bytes on;
+        if ($args ~ "start=(\d+)") {
+            set  $args  "bytes=0-12,$1-";
+        }
+    }
+
+Argument bytes= must contain range specification as defined in RFC 2616,
+"14.35.1 Byte Ranges", with the following exceptions:
+
+    1. Whitespaces aren't permitted.
+
+    1. Ranges must not overlap and must be monothonic.  E.g. something
+       like "bytes=10-20,0-10" isn't premitted.
+
+To compile nginx with bytes module, use "--add-module <path>" option to nginx
+configure.
