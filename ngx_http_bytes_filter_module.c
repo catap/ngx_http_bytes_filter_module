@@ -136,6 +136,9 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 
     bad = 0;
     len = 0;
+    suffix = 0;
+    start = 0;
+    end = 0;
 
     while (p < last) {
 
@@ -149,8 +152,6 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
                 state = sw_last_byte_pos;
                 break;
             }
-            suffix = 0;
-            start = 0;
             state = sw_first_byte_pos_n;
 
             /* fall through */
