@@ -325,26 +325,32 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     last = ctx->ranges.elts;
     last += ctx->ranges.nelts;
 
-#if 0
-    /* ... temp, rewrite */
+    /* optimized version for last range and last buffer */
 
-    if (ctx->ranges.nelts == 1) {
+    if (range == last - 1 && buf->last_buf) {
+
+        size = ngx_buf_size(buf);
 
         if (buf->in_file) {
-            buf->file_pos = range->start;
-            buf->file_last = range->end;
+            if (range->start > ctx->offset) {
+                buf->file_pos += range->start - ctx->offset;
+            }
+            if (range->end < ctx->offset + size) {
+                buf->file_last -= ctx->offset + size - range->end;
+            }
         }
 
         if (ngx_buf_in_memory(buf)) {
-            buf->pos = buf->start + (size_t) range->start;
-            buf->last = buf->start + (size_t) range->end;
+            if (range->start > ctx->offset) {
+                buf->pos += (size_t) (range->start - ctx->offset);
+            }
+            if (range->end < ctx->offset + size) {
+                buf->last -= (size_t) (ctx->offset + size - range->end);
+            }
         }
 
         return ngx_http_next_body_filter(r, in);
     }
-#endif
-
-    /* ... */
 
     for (ll = &in, cl = in; cl; ll = &cl->next, cl = cl->next,
                                                 ctx->offset += size)
