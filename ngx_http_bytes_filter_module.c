@@ -269,6 +269,11 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 done:
     r->headers_out.content_length_n = len;
 
+    if (r->headers_out.content_length) {
+        r->headers_out.content_length->hash = 0;
+        r->headers_out.content_length = NULL;
+    }
+
     ngx_http_set_ctx(r, ctx, ngx_http_bytes_filter_module);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
