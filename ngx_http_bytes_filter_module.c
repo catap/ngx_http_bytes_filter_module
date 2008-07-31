@@ -276,7 +276,7 @@ done:
 
     ngx_http_set_ctx(r, ctx, ngx_http_bytes_filter_module);
 
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "bytes header filter: new length %O",
                    r->headers_out.content_length_n);
 
