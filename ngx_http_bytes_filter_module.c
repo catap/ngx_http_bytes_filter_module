@@ -253,6 +253,12 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
             end = r->headers_out.content_length_n - 1;
         }
 
+        if (start > end) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "bytes header filter: invalid range specification");
+            return ngx_http_next_header_filter(r);
+        }
+
         range->start = start;
         range->end = end + 1;
         len += range->end - range->start;
@@ -261,7 +267,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
 
     default:
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "bytes header filter: invalid range specification");
+                       "bytes header filter: invalid range specification");
         return ngx_http_next_header_filter(r);
 
     }
@@ -335,6 +341,34 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (range == last - 1 && buf->last_buf) {
 
         size = ngx_buf_size(buf);
+
+        if (range->start > ctx->offset + size || range->end < ctx->offset) {
+
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "bytes body filter: last buffer ignored");
+
+            buf->pos = buf->last;
+
+            cl = ngx_alloc_chain_link(r->pool);
+            if (cl == NULL) {
+                return NGX_ERROR;
+            }
+
+            b = ngx_calloc_buf(r->pool);
+            if (b == NULL) {
+                return NGX_ERROR;
+            }
+
+            b->last_buf = 1;
+
+            cl->buf = b;
+            cl->next = NULL;
+      
+            return ngx_http_next_body_filter(r, cl);
+        }
+
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "bytes body filter: last buffer, %d", size);
 
         if (buf->in_file) {
             if (range->start > ctx->offset) {
