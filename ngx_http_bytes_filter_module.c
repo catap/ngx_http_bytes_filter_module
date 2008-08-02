@@ -357,9 +357,7 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return ngx_http_next_body_filter(r, in);
     }
 
-    for (ll = &in, cl = in; cl; ll = &cl->next, cl = cl->next,
-                                                ctx->offset += size)
-    {
+    for (ll = &in, cl = in; cl; cl = cl->next, ctx->offset += size) {
 
         buf = cl->buf;
         size = ngx_buf_size(buf);
@@ -371,19 +369,25 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             /* pass out anyway */
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: special buffer");
+            ll = &cl->next;
             continue;
         }
 
 next:
-        if (range->start > ctx->offset + size) {
+        if (range->start > ctx->offset + size || range->end < ctx->offset) {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: fully ignored buffer");
-            *ll = cl->next;
             buf->pos = buf->last;
+            *ll = cl->next;
             continue;
         }
 
-        /* todo: do not create buffers/links if not needed */
+        /* we should either free or reuse original buffer */
+
+        if (range == last - 1 || range[1].start > ctx->offset + size) {
+            b = buf;
+            goto fixup;
+        }
 
         b = ngx_calloc_buf(r->pool);
         if (b == NULL) {
@@ -420,6 +424,7 @@ next:
             b->last_buf = 1;
         }
 
+fixup:
         if (b->in_file) {
 
             ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -462,6 +467,8 @@ next:
                 goto next;
             }
         }
+
+        ll = &cl->next;
     }
 
     return ngx_http_next_body_filter(r, in);
