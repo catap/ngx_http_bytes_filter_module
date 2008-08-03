@@ -152,6 +152,7 @@ ngx_http_bytes_header_filter(ngx_http_request_t *r)
                 state = sw_last_byte_pos;
                 break;
             }
+            start = 0;
             state = sw_first_byte_pos_n;
 
             /* fall through */
