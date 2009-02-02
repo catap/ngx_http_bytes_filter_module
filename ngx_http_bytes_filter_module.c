@@ -399,9 +399,10 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         buf = cl->buf;
         size = ngx_buf_size(buf);
 
-        ngx_log_debug4(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "bytes body filter: b %O, offset %O, range %O-%O",
-                       size, ctx->offset, range->start, range->end);
+        ngx_log_debug5(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "bytes body filter: b %O, l %d, offset %O, range %O-%O",
+                       size, buf->last_buf, ctx->offset,
+                       range->start, range->end);
 
         if (ngx_buf_special(buf)) {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -425,7 +426,35 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         if (range->start > ctx->offset + size || range->end < ctx->offset) {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "bytes body filter: fully ignored buffer");
+
             buf->pos = buf->last;
+
+            if (!buf->last_buf) {
+                continue;
+            }
+
+            /* for last buffer, make sure we pass out empty one */
+
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "bytes body filter: last buffer ignored");
+
+            dcl = ngx_alloc_chain_link(r->pool);
+            if (dcl == NULL) {
+                return NGX_ERROR;
+            }
+
+            b = ngx_calloc_buf(r->pool);
+            if (b == NULL) {
+                return NGX_ERROR;
+            }
+
+            b->last_buf = 1;
+
+            *ll = dcl;
+            dcl->buf = b;
+            dcl->next = NULL;
+            ll = &dcl->next;
+
             continue;
         }
 

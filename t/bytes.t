@@ -17,7 +17,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->plan(24);
+my $t = Test::Nginx->new()->plan(25);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -75,6 +75,10 @@ $t1 = http_get('/t1?bytes=-10');
 like($t1, qr/200/, 'final bytes');
 like($t1, qr/Content-Length: 10/, 'final bytes length');
 like($t1, qr/^X099XXXXXX$/m, 'final bytes content');
+
+# standard error pages contain multiple buffers in one chain
+
+like(http_get('/notfound?bytes=0-9'), qr/404/, 'not found');
 
 # various range requests
 
