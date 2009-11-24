@@ -364,7 +364,7 @@ ngx_http_bytes_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             cl->buf = b;
             cl->next = NULL;
-      
+
             return ngx_http_next_body_filter(r, cl);
         }
 
